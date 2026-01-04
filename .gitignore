@@ -1,0 +1,22 @@
+# Data directories (too large for GitHub)
+*_sgns/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# IDE/Editor
+.claude/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output files (regeneratable)
+output/
+*.png
