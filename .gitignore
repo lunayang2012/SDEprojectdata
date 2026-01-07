@@ -16,3 +16,11 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Wayback downloads (can be large)
+wayback-output/
+
+# Credentials (NEVER commit)
+.ia
+*.credentials
+secrets.py
