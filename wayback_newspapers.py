@@ -1249,6 +1249,98 @@ class WaybackNewspaperDownloader:
         print(f"\n  Downloaded {len(downloaded)} articles to {output_dir}")
         return downloaded
 
+    def _extract_text_with_spaces(self, element) -> str:
+        """
+        Extract text from HTML element, preserving spaces between inline elements.
+
+        This fixes the issue where BeautifulSoup's get_text() concatenates
+        text from adjacent elements without spaces (e.g., hyperlinks).
+        """
+        if element is None:
+            return ""
+
+        # Get all text nodes and inline elements
+        texts = []
+        for item in element.descendants:
+            if isinstance(item, str):
+                text = item.strip()
+                if text:
+                    texts.append(text)
+            elif item.name in ['br', 'p', 'div', 'li', 'h1', 'h2', 'h3', 'h4']:
+                # Block elements get newlines
+                if texts and texts[-1] != '\n':
+                    texts.append('\n')
+
+        # Join with spaces, then clean up
+        result = ' '.join(texts)
+        # Fix multiple spaces
+        result = re.sub(r' +', ' ', result)
+        # Fix space before punctuation
+        result = re.sub(r' ([.,;:!?])', r'\1', result)
+        # Fix newlines
+        result = re.sub(r'\n +', '\n', result)
+        result = re.sub(r' +\n', '\n', result)
+
+        return result.strip()
+
+    def _clean_text(self, text: str) -> str:
+        """
+        Clean extracted text by fixing common issues.
+        """
+        # Fix missing spaces before capital letters (camelCase from links)
+        # e.g., "wordWord" -> "word Word"
+        text = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)
+
+        # Fix missing space after punctuation (but not in URLs or numbers)
+        text = re.sub(r'([.,;:!?])([A-Za-z])', r'\1 \2', text)
+
+        # Fix quotes without spaces
+        text = re.sub(r'([a-z])"([A-Z])', r'\1" \2', text)
+        text = re.sub(r'([.,])"([a-z])', r'\1" \2', text)
+
+        # Fix "By" prefix in author lines
+        text = re.sub(r'^By([A-Z])', r'By \1', text)
+
+        # Remove multiple spaces
+        text = re.sub(r' +', ' ', text)
+
+        return text.strip()
+
+    def _extract_author(self, soup) -> str:
+        """
+        Extract clean author name from HTML.
+        """
+        # Try meta tag first (usually cleanest)
+        author_tag = soup.find("meta", attrs={"name": "author"})
+        if author_tag:
+            author = author_tag.get("content", "")
+            if author:
+                # Clean up "By " prefix and duplicates
+                author = re.sub(r'^By\s*', '', author)
+                return author
+
+        # Try specific NYTimes byline patterns
+        byline = soup.find("span", class_=re.compile(r"byline-prefix", re.I))
+        if byline:
+            # Get just the name, not the bio
+            name_elem = byline.find_next("a") or byline.find_next("span")
+            if name_elem:
+                return name_elem.get_text(strip=True)
+
+        # Fallback to general byline
+        byline = soup.find(class_=re.compile(r"^byline$", re.I))
+        if byline:
+            # Try to get just names (usually in links)
+            names = []
+            for a in byline.find_all("a"):
+                name = a.get_text(strip=True)
+                if name and len(name) < 50:  # Reasonable name length
+                    names.append(name)
+            if names:
+                return ", ".join(names)
+
+        return ""
+
     def extract_full_articles_json(self, input_dir: Path,
                                     output_path: Optional[Path] = None) -> Dict:
         """
@@ -1259,7 +1351,7 @@ class WaybackNewspaperDownloader:
         - date: extracted date
         - title: article title
         - author: article author (if found)
-        - full_text: complete article text
+        - full_text: complete article text (cleaned)
         - word_count: number of words
 
         Args:
@@ -1327,15 +1419,8 @@ class WaybackNewspaperDownloader:
                     if len(headline) > len(article["title"]):
                         article["title"] = headline
 
-                # Extract author (common patterns)
-                author_tag = soup.find("meta", attrs={"name": "author"})
-                if author_tag:
-                    article["author"] = author_tag.get("content", "")
-
-                # Try byline patterns
-                byline = soup.find(class_=re.compile(r"byline|author", re.I))
-                if byline and not article["author"]:
-                    article["author"] = byline.get_text(strip=True)
+                # Extract author (using improved method)
+                article["author"] = self._extract_author(soup)
 
                 # Extract section
                 section_tag = soup.find("meta", attrs={"property": "article:section"})
@@ -1351,10 +1436,12 @@ class WaybackNewspaperDownloader:
                 article_body = soup.find("article") or soup.find(class_=re.compile(r"article|story|content", re.I))
 
                 if article_body:
-                    # Get all paragraphs from article body
+                    # Get all paragraphs from article body with proper spacing
                     paragraphs = []
                     for p in article_body.find_all("p"):
-                        text = p.get_text(strip=True)
+                        # Use improved text extraction
+                        text = self._extract_text_with_spaces(p)
+                        text = self._clean_text(text)
                         if len(text) > 30:  # Filter short paragraphs
                             paragraphs.append(text)
                     article["full_text"] = "\n\n".join(paragraphs)
@@ -1362,7 +1449,8 @@ class WaybackNewspaperDownloader:
                     # Fallback: get all paragraphs
                     paragraphs = []
                     for p in soup.find_all("p"):
-                        text = p.get_text(strip=True)
+                        text = self._extract_text_with_spaces(p)
+                        text = self._clean_text(text)
                         if len(text) > 50:
                             paragraphs.append(text)
                     article["full_text"] = "\n\n".join(paragraphs)
