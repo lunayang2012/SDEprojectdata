@@ -39,6 +39,16 @@ except ImportError:
     HAS_SKLEARN = False
 
 
+# Output directory for saving plots
+OUTPUT_DIR = Path(__file__).parent / "output"
+
+
+def get_output_path(filename: str) -> Path:
+    """Get path in output directory, creating it if needed."""
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    return OUTPUT_DIR / filename
+
+
 class HistWordsAnalyzer:
     """Main class for analyzing HistWords embeddings."""
 
@@ -595,13 +605,15 @@ class HistWordsAnalyzer:
 
     # ==================== VISUALIZATION METHODS ====================
 
-    def plot_semantic_change(self, word: str, save_path: Optional[str] = None) -> Optional[Dict]:
+    def plot_semantic_change(self, word: str, save_path: Optional[str] = None,
+                              save: bool = True) -> Optional[Dict]:
         """
         Plot semantic change of a word over time.
 
         Args:
             word: The word to analyze
-            save_path: Optional path to save the figure
+            save_path: Optional path to save the figure (defaults to output folder)
+            save: Whether to save the figure (default True)
 
         Returns:
             Dictionary with change data, or None if plotting unavailable
@@ -609,6 +621,10 @@ class HistWordsAnalyzer:
         if not HAS_MATPLOTLIB:
             print("Matplotlib not installed. Install with: pip install matplotlib")
             return None
+
+        # Default save path to output directory
+        if save and save_path is None:
+            save_path = get_output_path(f"{word}_semantic_change.png")
 
         # Find years where word exists
         available_years = []
@@ -674,13 +690,15 @@ class HistWordsAnalyzer:
         }
 
     def plot_similarity_over_time(self, word_pairs: List[Tuple[str, str]],
-                                   save_path: Optional[str] = None) -> Optional[Dict]:
+                                   save_path: Optional[str] = None,
+                                   save: bool = True) -> Optional[Dict]:
         """
         Plot similarity between word pairs over time.
 
         Args:
             word_pairs: List of (word1, word2) tuples to compare
-            save_path: Optional path to save the figure
+            save_path: Optional path to save the figure (defaults to output folder)
+            save: Whether to save the figure (default True)
 
         Returns:
             Dictionary with similarity data
@@ -688,6 +706,10 @@ class HistWordsAnalyzer:
         if not HAS_MATPLOTLIB:
             print("Matplotlib not installed. Install with: pip install matplotlib")
             return None
+
+        # Default save path to output directory
+        if save and save_path is None:
+            save_path = get_output_path("word_pair_similarity.png")
 
         fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -728,7 +750,8 @@ class HistWordsAnalyzer:
 
     def plot_neighborhood_evolution(self, word: str, top_k: int = 10,
                                      years: Optional[List[int]] = None,
-                                     save_path: Optional[str] = None) -> Optional[Dict]:
+                                     save_path: Optional[str] = None,
+                                     save: bool = True) -> Optional[Dict]:
         """
         Visualize how a word's neighborhood evolves over time.
 
@@ -736,7 +759,8 @@ class HistWordsAnalyzer:
             word: The word to analyze
             top_k: Number of neighbors to track
             years: Specific years to show (defaults to all)
-            save_path: Optional path to save the figure
+            save_path: Optional path to save the figure (defaults to output folder)
+            save: Whether to save the figure (default True)
 
         Returns:
             Dictionary with neighborhood data
@@ -744,6 +768,10 @@ class HistWordsAnalyzer:
         if not HAS_MATPLOTLIB:
             print("Matplotlib not installed. Install with: pip install matplotlib")
             return None
+
+        # Default save path to output directory
+        if save and save_path is None:
+            save_path = get_output_path(f"{word}_neighborhood.png")
 
         if years is None:
             years = self.years
@@ -1187,14 +1215,16 @@ class HistWordsAnalyzer:
         return top_matches
 
     def plot_drift_clusters(self, n_clusters: int = 5, sample_size: int = 300,
-                            save_path: Optional[str] = None) -> Optional[Dict]:
+                            save_path: Optional[str] = None,
+                            save: bool = True) -> Optional[Dict]:
         """
         Visualize semantic drift clusters using PCA.
 
         Args:
             n_clusters: Number of clusters
             sample_size: Number of words to analyze
-            save_path: Optional path to save figure
+            save_path: Optional path to save figure (defaults to output folder)
+            save: Whether to save the figure (default True)
 
         Returns:
             Cluster data dictionary
@@ -1202,6 +1232,10 @@ class HistWordsAnalyzer:
         if not HAS_MATPLOTLIB or not HAS_SKLEARN:
             print("Requires matplotlib and scikit-learn")
             return None
+
+        # Default save path to output directory
+        if save and save_path is None:
+            save_path = get_output_path("drift_clusters.png")
 
         valid_words, change_vectors = self.compute_change_vectors(sample_size=sample_size)
 
@@ -1447,14 +1481,16 @@ class HistWordsAnalyzer:
         return results
 
     def plot_cultural_shifts(self, top_k: int = 10, sample_size: int = 1000,
-                              save_path: Optional[str] = None) -> Optional[Dict]:
+                              save_path: Optional[str] = None,
+                              save: bool = True) -> Optional[Dict]:
         """
         Visualize cultural shifts across all time periods.
 
         Args:
             top_k: Number of top changing words to show
             sample_size: Number of words to analyze
-            save_path: Optional path to save figure
+            save_path: Optional path to save figure (defaults to output folder)
+            save: Whether to save the figure (default True)
 
         Returns:
             Shift data dictionary
@@ -1462,6 +1498,10 @@ class HistWordsAnalyzer:
         if not HAS_MATPLOTLIB:
             print("Matplotlib not installed")
             return None
+
+        # Default save path to output directory
+        if save and save_path is None:
+            save_path = get_output_path("cultural_shifts.png")
 
         shifts = self.detect_cultural_shifts(top_k=top_k, sample_size=sample_size)
 

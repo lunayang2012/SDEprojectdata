@@ -11,9 +11,7 @@ Usage:
 """
 
 import sys
-import os
 import numpy as np
-from pathlib import Path
 
 from histwords_analysis import HistWordsAnalyzer, list_available_datasets
 
@@ -143,7 +141,7 @@ def run_basic_examples(eng: HistWordsAnalyzer):
         print(f"\nVector for 'democracy' (1950): shape={vec.shape}, L2 norm={norm:.4f}")
 
 
-def run_visualization_examples(eng: HistWordsAnalyzer, output_dir: Path):
+def run_visualization_examples(eng: HistWordsAnalyzer):
     """Run visualization examples (requires matplotlib)."""
 
     if not HAS_MATPLOTLIB:
@@ -155,26 +153,19 @@ def run_visualization_examples(eng: HistWordsAnalyzer, output_dir: Path):
 
     # Plot semantic change over time for a word
     print_section("Plotting semantic change", level=2)
-    result = eng.plot_semantic_change("computer", save_path=output_dir / "computer_change.png")
-    if result:
-        print(f"  Saved to: {output_dir / 'computer_change.png'}")
+    eng.plot_semantic_change("computer")
 
     # Plot similarity between word pairs over time
     print_section("Plotting word pair similarities", level=2)
-    result = eng.plot_similarity_over_time([
+    eng.plot_similarity_over_time([
         ("gay", "happy"),
         ("gay", "homosexual"),
         ("woman", "work")
-    ], save_path=output_dir / "word_pairs.png")
-    if result:
-        print(f"  Saved to: {output_dir / 'word_pairs.png'}")
+    ])
 
     # Visualize neighborhood evolution
     print_section("Plotting neighborhood evolution", level=2)
-    result = eng.plot_neighborhood_evolution("woman", top_k=10,
-                                              save_path=output_dir / "woman_neighbors.png")
-    if result:
-        print(f"  Saved to: {output_dir / 'woman_neighbors.png'}")
+    eng.plot_neighborhood_evolution("woman", top_k=10)
 
 
 def run_birth_death_examples(eng: HistWordsAnalyzer):
@@ -208,7 +199,7 @@ def run_birth_death_examples(eng: HistWordsAnalyzer):
         print(f"\nFirst neologism: '{neologisms[0][0]}' appeared in {neologisms[0][1]}")
 
 
-def run_clustering_examples(eng: HistWordsAnalyzer, output_dir: Path):
+def run_clustering_examples(eng: HistWordsAnalyzer):
     """Run semantic drift clustering examples (requires sklearn)."""
 
     if not HAS_SKLEARN:
@@ -237,11 +228,10 @@ def run_clustering_examples(eng: HistWordsAnalyzer, output_dir: Path):
     # Visualize drift clusters (requires matplotlib + sklearn)
     if HAS_MATPLOTLIB:
         print_section("Plotting drift clusters", level=2)
-        eng.plot_drift_clusters(n_clusters=5, sample_size=300,
-                                save_path=output_dir / "drift_clusters.png")
+        eng.plot_drift_clusters(n_clusters=5, sample_size=300)
 
 
-def run_cultural_shift_examples(eng: HistWordsAnalyzer, output_dir: Path):
+def run_cultural_shift_examples(eng: HistWordsAnalyzer):
     """Run cultural shift detection examples."""
 
     print_section("EXAMPLE 9: CULTURAL SHIFT DETECTION")
@@ -267,7 +257,7 @@ def run_cultural_shift_examples(eng: HistWordsAnalyzer, output_dir: Path):
 
     # Analyze specific cultural eras
     print_section("Cultural era analysis: The Digital Age", level=2)
-    digital_era = eng.cultural_era_analysis(
+    eng.cultural_era_analysis(
         era_name="The Digital Age",
         start_year=1960,
         end_year=1990,
@@ -275,7 +265,7 @@ def run_cultural_shift_examples(eng: HistWordsAnalyzer, output_dir: Path):
     )
 
     print_section("Cultural era analysis: Women's Rights Movement", level=2)
-    women_era = eng.cultural_era_analysis(
+    eng.cultural_era_analysis(
         era_name="Women's Rights Era",
         start_year=1920,
         end_year=1970,
@@ -285,8 +275,7 @@ def run_cultural_shift_examples(eng: HistWordsAnalyzer, output_dir: Path):
     # Visualize cultural shift intensity over time
     if HAS_MATPLOTLIB:
         print_section("Plotting cultural shift intensity", level=2)
-        eng.plot_cultural_shifts(top_k=10, sample_size=500,
-                                  save_path=output_dir / "cultural_shifts.png")
+        eng.plot_cultural_shifts(top_k=10, sample_size=500)
 
 
 def print_summary():
@@ -338,11 +327,6 @@ def main():
     # Parse simple arguments
     quick_mode = "--quick" in sys.argv
 
-    # Create output directory for plots
-    output_dir = Path(__file__).parent / "output"
-    if HAS_MATPLOTLIB:
-        output_dir.mkdir(exist_ok=True)
-
     # List available datasets
     print("Available datasets:")
     for ds in list_available_datasets():
@@ -362,10 +346,10 @@ def main():
         print("Run without --quick to see all examples")
     else:
         # Run examples requiring optional dependencies
-        run_visualization_examples(eng, output_dir)
+        run_visualization_examples(eng)
         run_birth_death_examples(eng)
-        run_clustering_examples(eng, output_dir)
-        run_cultural_shift_examples(eng, output_dir)
+        run_clustering_examples(eng)
+        run_cultural_shift_examples(eng)
 
     # Print summary
     print_summary()

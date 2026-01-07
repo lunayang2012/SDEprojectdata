@@ -10,10 +10,9 @@ Usage:
 """
 
 import numpy as np
-from pathlib import Path
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
-from histwords_analysis import HistWordsAnalyzer, list_available_datasets
+from histwords_analysis import HistWordsAnalyzer, list_available_datasets, get_output_path
 
 # Check for optional dependencies
 try:
@@ -506,11 +505,15 @@ class DescriptiveAnalyzer:
 
         return report
 
-    def plot_vocabulary_over_time(self, save_path: Optional[str] = None):
+    def plot_vocabulary_over_time(self, save_path: Optional[str] = None, save: bool = True):
         """Plot vocabulary size over time."""
         if not HAS_MATPLOTLIB:
             print("Matplotlib not installed - skipping plot")
             return
+
+        # Default save path to output directory
+        if save and save_path is None:
+            save_path = get_output_path("vocab_over_time.png")
 
         sizes = []
         for year in self.years:
@@ -535,11 +538,16 @@ class DescriptiveAnalyzer:
         plt.show()
 
     def plot_semantic_change_histogram(self, sample_size: int = 1000,
-                                        save_path: Optional[str] = None):
+                                        save_path: Optional[str] = None,
+                                        save: bool = True):
         """Plot histogram of semantic change distribution."""
         if not HAS_MATPLOTLIB:
             print("Matplotlib not installed - skipping plot")
             return
+
+        # Default save path to output directory
+        if save and save_path is None:
+            save_path = get_output_path("change_histogram.png")
 
         # Compute changes
         first_year, last_year = self.years[0], self.years[-1]
@@ -616,12 +624,9 @@ def main():
 
     # Plots (if matplotlib available)
     if HAS_MATPLOTLIB:
-        output_dir = Path(__file__).parent / "output"
-        output_dir.mkdir(exist_ok=True)
-
         print_header("GENERATING PLOTS")
-        analyzer.plot_vocabulary_over_time(save_path=output_dir / "vocab_over_time.png")
-        analyzer.plot_semantic_change_histogram(save_path=output_dir / "change_histogram.png")
+        analyzer.plot_vocabulary_over_time()
+        analyzer.plot_semantic_change_histogram()
 
     print_header("ANALYSIS COMPLETE")
     print("""
