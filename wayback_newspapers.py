@@ -25,14 +25,22 @@ Or create a config file at ~/.ia with:
 """
 
 import os
+import re
 import json
 import time
 import requests
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from datetime import datetime
-from urllib.parse import quote, urljoin
+from urllib.parse import quote
 import hashlib
+
+# Optional: HTML parsing
+try:
+    from bs4 import BeautifulSoup
+    HAS_BS4 = True
+except ImportError:
+    HAS_BS4 = False
 
 # Output directory
 OUTPUT_DIR = Path(__file__).parent / "wayback-output"
@@ -847,6 +855,548 @@ class WaybackNewspaperDownloader:
 
         print(f"\n  Downloaded {len(downloaded)}/{len(files)} files to {download_dir}")
         return downloaded
+
+    # ==================== TEXT EXTRACTION ====================
+
+    def extract_text_from_html(self, html_path: Path,
+                                remove_scripts: bool = True,
+                                remove_styles: bool = True) -> Optional[str]:
+        """
+        Extract readable text from an HTML file.
+
+        Args:
+            html_path: Path to HTML file
+            remove_scripts: Remove script tags
+            remove_styles: Remove style tags
+
+        Returns:
+            Extracted text or None
+        """
+        if not HAS_BS4:
+            print("BeautifulSoup not installed. Install with: pip install beautifulsoup4")
+            return None
+
+        try:
+            with open(html_path, "r", encoding="utf-8", errors="ignore") as f:
+                html_content = f.read()
+
+            soup = BeautifulSoup(html_content, "lxml")
+
+            # Remove unwanted elements
+            if remove_scripts:
+                for script in soup(["script", "noscript"]):
+                    script.decompose()
+
+            if remove_styles:
+                for style in soup(["style"]):
+                    style.decompose()
+
+            # Remove hidden elements
+            for hidden in soup.find_all(style=re.compile(r"display:\s*none")):
+                hidden.decompose()
+
+            # Get text
+            text = soup.get_text(separator="\n", strip=True)
+
+            # Clean up whitespace
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
+            text = "\n".join(lines)
+
+            return text
+
+        except Exception as e:
+            print(f"  Error extracting text: {e}")
+            return None
+
+    def extract_article_content(self, html_path: Path, include_full_text: bool = True) -> Dict:
+        """
+        Extract structured content from a newspaper HTML page.
+
+        Args:
+            html_path: Path to HTML file
+            include_full_text: Whether to include the full article text
+
+        Returns:
+            Dictionary with title, headlines, full_text, articles, etc.
+        """
+        if not HAS_BS4:
+            print("BeautifulSoup not installed. Install with: pip install beautifulsoup4")
+            return {}
+
+        try:
+            with open(html_path, "r", encoding="utf-8", errors="ignore") as f:
+                html_content = f.read()
+
+            soup = BeautifulSoup(html_content, "lxml")
+
+            # Extract timestamp from filename
+            timestamp = html_path.stem.split("_")[0]
+            date_str = ""
+            if len(timestamp) >= 8 and timestamp[:8].isdigit():
+                date_str = f"{timestamp[:4]}-{timestamp[4:6]}-{timestamp[6:8]}"
+
+            content = {
+                "file": str(html_path.name),
+                "date": date_str,
+                "title": "",
+                "headlines": [],
+                "full_text": "",
+                "paragraphs": [],
+                "links": [],
+                "meta_description": "",
+                "word_count": 0
+            }
+
+            # Extract title
+            title_tag = soup.find("title")
+            if title_tag:
+                content["title"] = title_tag.get_text(strip=True)
+
+            # Extract meta description
+            meta_desc = soup.find("meta", attrs={"name": "description"})
+            if meta_desc:
+                content["meta_description"] = meta_desc.get("content", "")
+
+            # Extract headlines (h1, h2, h3)
+            for tag in ["h1", "h2", "h3"]:
+                for heading in soup.find_all(tag):
+                    text = heading.get_text(strip=True)
+                    if text and len(text) > 10:
+                        content["headlines"].append(text)
+
+            # Extract ALL paragraphs (full text, not snippets)
+            for p in soup.find_all("p"):
+                text = p.get_text(strip=True)
+                if len(text) > 50:  # Filter out very short paragraphs
+                    content["paragraphs"].append(text)
+
+            # Extract news links
+            for a in soup.find_all("a", href=True):
+                href = a.get("href", "")
+                text = a.get_text(strip=True)
+                # Match year patterns in URLs
+                if any(f"/{year}/" in href for year in range(2020, 2030)):
+                    if text and len(text) > 20:
+                        content["links"].append({"text": text, "href": href})
+
+            # Get full cleaned text
+            if include_full_text:
+                full_text = self.extract_text_from_html(html_path)
+                if full_text:
+                    content["full_text"] = full_text
+                    content["word_count"] = len(full_text.split())
+
+            return content
+
+        except Exception as e:
+            print(f"  Error extracting content: {e}")
+            return {}
+
+    def bulk_extract_text(self, input_dir: Path,
+                          output_dir: Optional[Path] = None,
+                          file_pattern: str = "*.html") -> List[Path]:
+        """
+        Extract text from all HTML files in a directory.
+
+        Args:
+            input_dir: Directory containing HTML files
+            output_dir: Where to save text files (default: same dir with _text suffix)
+            file_pattern: Glob pattern for files
+
+        Returns:
+            List of created text file paths
+        """
+        print(f"\n{'='*60}")
+        print(f"BULK TEXT EXTRACTION")
+        print(f"Input: {input_dir}")
+        print(f"{'='*60}")
+
+        if not HAS_BS4:
+            print("BeautifulSoup not installed. Install with: pip install beautifulsoup4")
+            return []
+
+        if output_dir is None:
+            output_dir = input_dir.parent / f"{input_dir.name}_text"
+
+        output_dir.mkdir(exist_ok=True)
+
+        html_files = list(input_dir.glob(file_pattern))
+        print(f"  Found {len(html_files)} HTML files")
+
+        extracted = []
+        for i, html_path in enumerate(html_files):
+            print(f"  [{i+1}/{len(html_files)}] Processing: {html_path.name}")
+
+            text = self.extract_text_from_html(html_path)
+            if text:
+                output_path = output_dir / f"{html_path.stem}.txt"
+                with open(output_path, "w", encoding="utf-8") as f:
+                    f.write(text)
+                extracted.append(output_path)
+                print(f"    Extracted {len(text.split())} words")
+
+        print(f"\n  Extracted text from {len(extracted)} files to {output_dir}")
+        return extracted
+
+    def bulk_extract_articles(self, input_dir: Path,
+                               output_path: Optional[Path] = None,
+                               include_full_text: bool = True) -> Dict:
+        """
+        Extract structured article data from all HTML files with FULL TEXT.
+
+        Args:
+            input_dir: Directory containing HTML files
+            output_path: Where to save JSON results
+            include_full_text: Include the complete article text in output
+
+        Returns:
+            Dictionary with all extracted data including full article text
+        """
+        print(f"\n{'='*60}")
+        print(f"BULK ARTICLE EXTRACTION (Full Text)")
+        print(f"Input: {input_dir}")
+        print(f"{'='*60}")
+
+        if not HAS_BS4:
+            print("BeautifulSoup not installed. Install with: pip install beautifulsoup4")
+            return {}
+
+        html_files = sorted(input_dir.glob("*.html"))
+        print(f"  Found {len(html_files)} HTML files")
+
+        all_data = {
+            "extraction_date": datetime.now().isoformat(),
+            "source_dir": str(input_dir),
+            "file_count": len(html_files),
+            "articles": [],
+            "all_headlines": [],
+            "total_words": 0,
+            "total_paragraphs": 0
+        }
+
+        for i, html_path in enumerate(html_files):
+            print(f"  [{i+1}/{len(html_files)}] Processing: {html_path.name}")
+
+            content = self.extract_article_content(html_path, include_full_text=include_full_text)
+            if content:
+                all_data["articles"].append(content)
+                all_data["all_headlines"].extend(content.get("headlines", []))
+                all_data["total_words"] += content.get("word_count", 0)
+                all_data["total_paragraphs"] += len(content.get("paragraphs", []))
+
+        # Summary stats
+        all_data["unique_headlines"] = len(set(all_data["all_headlines"]))
+        all_data["avg_words_per_page"] = (
+            all_data["total_words"] // len(html_files) if html_files else 0
+        )
+
+        print(f"\n  Summary:")
+        print(f"    Total articles: {len(all_data['articles'])}")
+        print(f"    Total headlines: {len(all_data['all_headlines'])}")
+        print(f"    Unique headlines: {all_data['unique_headlines']}")
+        print(f"    Total paragraphs: {all_data['total_paragraphs']:,}")
+        print(f"    Total words: {all_data['total_words']:,}")
+        print(f"    Avg words/page: {all_data['avg_words_per_page']:,}")
+
+        # Save results
+        if output_path is None:
+            output_path = get_output_path(f"full_articles_{input_dir.name}.json")
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(all_data, f, indent=2, ensure_ascii=False)
+
+        file_size = output_path.stat().st_size / (1024 * 1024)
+        print(f"\n  Results saved to: {output_path}")
+        print(f"  File size: {file_size:.2f} MB")
+        return all_data
+
+    def create_text_corpus(self, input_dir: Path,
+                           output_path: Optional[Path] = None) -> Path:
+        """
+        Create a single text corpus file from all HTML files.
+
+        Args:
+            input_dir: Directory containing HTML files
+            output_path: Output file path
+
+        Returns:
+            Path to corpus file
+        """
+        print(f"\n{'='*60}")
+        print(f"CREATING TEXT CORPUS")
+        print(f"Input: {input_dir}")
+        print(f"{'='*60}")
+
+        if not HAS_BS4:
+            print("BeautifulSoup not installed. Install with: pip install beautifulsoup4")
+            return None
+
+        html_files = sorted(input_dir.glob("*.html"))
+        print(f"  Found {len(html_files)} HTML files")
+
+        if output_path is None:
+            output_path = get_output_path(f"corpus_{input_dir.name}.txt")
+
+        total_words = 0
+        with open(output_path, "w", encoding="utf-8") as out_f:
+            for i, html_path in enumerate(html_files):
+                # Extract date from filename (format: YYYYMMDD...)
+                timestamp = html_path.stem.split("_")[0]
+                date_str = f"{timestamp[:4]}-{timestamp[4:6]}-{timestamp[6:8]}"
+
+                out_f.write(f"\n{'='*60}\n")
+                out_f.write(f"DATE: {date_str}\n")
+                out_f.write(f"FILE: {html_path.name}\n")
+                out_f.write(f"{'='*60}\n\n")
+
+                text = self.extract_text_from_html(html_path)
+                if text:
+                    out_f.write(text)
+                    out_f.write("\n\n")
+                    total_words += len(text.split())
+
+                print(f"  [{i+1}/{len(html_files)}] Added: {date_str}")
+
+        file_size = output_path.stat().st_size / (1024 * 1024)
+        print(f"\n  Corpus created:")
+        print(f"    Path: {output_path}")
+        print(f"    Size: {file_size:.2f} MB")
+        print(f"    Total words: {total_words:,}")
+
+        return output_path
+
+    def download_articles_from_links(self, json_path: Path,
+                                       max_articles: int = 50,
+                                       output_dir: Optional[Path] = None) -> List[Path]:
+        """
+        Download individual article pages from links extracted from homepage.
+
+        Args:
+            json_path: Path to JSON file with extracted article links
+            max_articles: Maximum articles to download
+            output_dir: Where to save downloaded articles
+
+        Returns:
+            List of downloaded file paths
+        """
+        print(f"\n{'='*60}")
+        print(f"DOWNLOADING INDIVIDUAL ARTICLES")
+        print(f"{'='*60}")
+
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        # Collect all unique article URLs
+        all_links = []
+        seen_urls = set()
+        for article in data.get("articles", []):
+            for link in article.get("links", []):
+                href = link.get("href", "")
+                # Filter for actual article URLs (contain year pattern, not interactive)
+                if href and href not in seen_urls:
+                    if any(f"/{year}/" in href for year in range(2020, 2030)):
+                        if "interactive" not in href and ".html" in href:
+                            seen_urls.add(href)
+                            all_links.append(link)
+
+        print(f"  Found {len(all_links)} unique article URLs")
+
+        if output_dir is None:
+            output_dir = get_output_path("articles_full")
+        output_dir.mkdir(exist_ok=True)
+
+        downloaded = []
+        for i, link in enumerate(all_links[:max_articles]):
+            original_url = link["href"]
+            title = link["text"][:50]
+
+            # Create safe filename
+            url_hash = hashlib.md5(original_url.encode()).hexdigest()[:8]
+            # Extract date from URL if possible
+            date_match = re.search(r"/(\d{4})/(\d{2})/(\d{2})/", original_url)
+            if date_match:
+                date_str = f"{date_match.group(1)}{date_match.group(2)}{date_match.group(3)}"
+            else:
+                date_str = "nodate"
+
+            filename = f"{date_str}_{url_hash}.html"
+            output_path = output_dir / filename
+
+            if output_path.exists():
+                print(f"  [{i+1}/{min(len(all_links), max_articles)}] Skipping (exists): {title}...")
+                downloaded.append(output_path)
+                continue
+
+            # Try to get from Wayback first
+            print(f"  [{i+1}/{min(len(all_links), max_articles)}] Downloading: {title}...")
+
+            # Check Wayback availability
+            availability = self.check_availability(original_url)
+            if availability:
+                wayback_url = availability.get("url")
+                try:
+                    response = self._make_request(wayback_url, stream=True)
+                    with open(output_path, "wb") as f:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            f.write(chunk)
+                    downloaded.append(output_path)
+                    print(f"    Saved from Wayback")
+                except Exception as e:
+                    print(f"    Failed: {e}")
+            else:
+                print(f"    Not available in Wayback")
+
+        print(f"\n  Downloaded {len(downloaded)} articles to {output_dir}")
+        return downloaded
+
+    def extract_full_articles_json(self, input_dir: Path,
+                                    output_path: Optional[Path] = None) -> Dict:
+        """
+        Extract full article text from downloaded article pages and save as JSON.
+
+        Each article will have:
+        - file: source filename
+        - date: extracted date
+        - title: article title
+        - author: article author (if found)
+        - full_text: complete article text
+        - word_count: number of words
+
+        Args:
+            input_dir: Directory containing HTML article files
+            output_path: Where to save JSON results
+
+        Returns:
+            Dictionary with all extracted articles
+        """
+        print(f"\n{'='*60}")
+        print(f"EXTRACTING FULL ARTICLE TEXT TO JSON")
+        print(f"Input: {input_dir}")
+        print(f"{'='*60}")
+
+        if not HAS_BS4:
+            print("BeautifulSoup not installed.")
+            return {}
+
+        html_files = sorted(input_dir.glob("*.html"))
+        print(f"  Found {len(html_files)} HTML files")
+
+        all_data = {
+            "extraction_date": datetime.now().isoformat(),
+            "source_dir": str(input_dir),
+            "article_count": 0,
+            "total_words": 0,
+            "articles": []
+        }
+
+        for i, html_path in enumerate(html_files):
+            print(f"  [{i+1}/{len(html_files)}] Processing: {html_path.name}")
+
+            try:
+                with open(html_path, "r", encoding="utf-8", errors="ignore") as f:
+                    html_content = f.read()
+
+                soup = BeautifulSoup(html_content, "lxml")
+
+                # Extract date from filename
+                date_match = re.match(r"(\d{8})", html_path.stem)
+                date_str = ""
+                if date_match:
+                    d = date_match.group(1)
+                    date_str = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+
+                article = {
+                    "file": html_path.name,
+                    "date": date_str,
+                    "title": "",
+                    "author": "",
+                    "section": "",
+                    "full_text": "",
+                    "word_count": 0
+                }
+
+                # Extract title
+                title_tag = soup.find("title")
+                if title_tag:
+                    article["title"] = title_tag.get_text(strip=True)
+
+                # Try to find article headline (h1)
+                h1 = soup.find("h1")
+                if h1:
+                    headline = h1.get_text(strip=True)
+                    if len(headline) > len(article["title"]):
+                        article["title"] = headline
+
+                # Extract author (common patterns)
+                author_tag = soup.find("meta", attrs={"name": "author"})
+                if author_tag:
+                    article["author"] = author_tag.get("content", "")
+
+                # Try byline patterns
+                byline = soup.find(class_=re.compile(r"byline|author", re.I))
+                if byline and not article["author"]:
+                    article["author"] = byline.get_text(strip=True)
+
+                # Extract section
+                section_tag = soup.find("meta", attrs={"property": "article:section"})
+                if section_tag:
+                    article["section"] = section_tag.get("content", "")
+
+                # Extract full article text
+                # Remove unwanted elements first
+                for tag in soup(["script", "noscript", "style", "nav", "header", "footer", "aside"]):
+                    tag.decompose()
+
+                # Find article body (common container classes)
+                article_body = soup.find("article") or soup.find(class_=re.compile(r"article|story|content", re.I))
+
+                if article_body:
+                    # Get all paragraphs from article body
+                    paragraphs = []
+                    for p in article_body.find_all("p"):
+                        text = p.get_text(strip=True)
+                        if len(text) > 30:  # Filter short paragraphs
+                            paragraphs.append(text)
+                    article["full_text"] = "\n\n".join(paragraphs)
+                else:
+                    # Fallback: get all paragraphs
+                    paragraphs = []
+                    for p in soup.find_all("p"):
+                        text = p.get_text(strip=True)
+                        if len(text) > 50:
+                            paragraphs.append(text)
+                    article["full_text"] = "\n\n".join(paragraphs)
+
+                article["word_count"] = len(article["full_text"].split())
+
+                if article["word_count"] > 100:  # Only include substantial articles
+                    all_data["articles"].append(article)
+                    all_data["total_words"] += article["word_count"]
+                    print(f"    Title: {article['title'][:60]}...")
+                    print(f"    Words: {article['word_count']}")
+
+            except Exception as e:
+                print(f"    Error: {e}")
+
+        all_data["article_count"] = len(all_data["articles"])
+        all_data["avg_words"] = all_data["total_words"] // max(1, all_data["article_count"])
+
+        print(f"\n  Summary:")
+        print(f"    Articles extracted: {all_data['article_count']}")
+        print(f"    Total words: {all_data['total_words']:,}")
+        print(f"    Avg words/article: {all_data['avg_words']:,}")
+
+        if output_path is None:
+            output_path = get_output_path(f"newspaper_articles_{input_dir.name}.json")
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(all_data, f, indent=2, ensure_ascii=False)
+
+        file_size = output_path.stat().st_size / (1024 * 1024)
+        print(f"\n  Saved to: {output_path}")
+        print(f"  File size: {file_size:.2f} MB")
+
+        return all_data
 
     # ==================== REPORTS AND SUMMARIES ====================
 
