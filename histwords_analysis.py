@@ -40,7 +40,7 @@ except ImportError:
 
 
 # Output directory for saving plots
-OUTPUT_DIR = Path(__file__).parent / "output"
+OUTPUT_DIR = Path(__file__).parent / "hist-output"
 
 
 def get_output_path(filename: str) -> Path:
